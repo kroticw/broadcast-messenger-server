@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
+	"fmt"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"time"
 )
@@ -27,7 +27,7 @@ func init() {
 
 type Message struct {
 	TargetIP   string `json:"target_ip"`
-	TargetPort string `json:"target_port"`
+	TargetPort int    `json:"target_port"`
 	Data       string `json:"data"`
 }
 
@@ -38,18 +38,17 @@ func executeServeCommand(_ *cobra.Command, _ []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	udpAddr, err := net.ResolveUDPAddr("udp", ":8000")
+	serverAddress, err := net.ResolveUDPAddr("udp4", "255.255.255.255:8889")
 	if err != nil {
-		logrus.Fatal(err)
+		fmt.Println(err)
+		return
 	}
-
-	udpConn, err := net.ListenUDP("udp", udpAddr)
+	connection, err := net.ListenUDP("udp", serverAddress)
 	if err != nil {
-		logrus.Fatal(err)
+		fmt.Println(err)
+		return
 	}
-	defer udpConn.Close()
-
-	buffer := make([]byte, 1024)
+	defer connection.Close()
 
 	for {
 		select {
@@ -57,80 +56,115 @@ func executeServeCommand(_ *cobra.Command, _ []string) {
 			stop()
 			return
 		default:
-			err := udpConn.SetReadDeadline(time.Now().Add(1 * time.Second))
+			err := connection.SetReadDeadline(time.Now().Add(1 * time.Second))
 			if err != nil {
 				logrus.Fatal(err)
 				return
 			}
-			n, clientAddr, err := udpConn.ReadFromUDP(buffer)
+
+			inputBytes := make([]byte, 36)
+			n, clientAddress, err := connection.ReadFromUDP(inputBytes)
 			if err != nil {
-				var netErr net.Error
-				if errors.As(err, &netErr) && netErr.Timeout() {
-					continue
-				}
-				logrus.Error(err)
+				fmt.Println(err)
 				continue
 			}
-
-			go handleClient(clientAddr, buffer[:n])
+			fmt.Println("Received message from", clientAddress)
+			fmt.Println(string(inputBytes))
+			go handleTunnelClient(clientAddress, inputBytes[:n])
 		}
 	}
 }
 
-func handleClient(clientAddr *net.UDPAddr, data []byte) {
-	var msg Message
-	err := json.Unmarshal(data, &msg)
+/*string(data)[len(string(data))-4:]*/
+func handleTunnelClient(clientAddr *net.UDPAddr, data []byte) {
+	logrus.Println(string(data)[len(string(data))-4:])
+	rtcpAddr, err := net.ResolveTCPAddr("tcp", clientAddr.IP.String()+":8888")
+	//ltcpAddr, err := net.ResolveTCPAddr("tcp", clientAddr.IP.String()+":8888")
 	if err != nil {
 		logrus.Error(err)
 		return
 	}
-
-	mu.Lock()
-	tcpConn, exists := clients[clientAddr.IP.String()]
-	if !exists {
-		tcpAddr, err := net.ResolveTCPAddr("tcp", clientAddr.IP.String()+":9000")
-		if err != nil {
-			logrus.Error(err)
-			mu.Unlock()
-			return
-		}
-
-		tcpConn, err = net.DialTCP("tcp", nil, tcpAddr)
-		if err != nil {
-			logrus.Error(err)
-			mu.Unlock()
-			return
-		}
-		clients[clientAddr.IP.String()] = tcpConn
-	}
-	mu.Unlock()
-
-	targetAddr := msg.TargetIP + ":" + msg.TargetPort
-	mu.Lock()
-	targetConn, exists := clients[targetAddr]
-	if !exists {
-		tcpAddr, err := net.ResolveTCPAddr("tcp", targetAddr)
-		if err != nil {
-			logrus.Error(err)
-			mu.Unlock()
-			return
-		}
-
-		targetConn, err = net.DialTCP("tcp", nil, tcpAddr)
-		if err != nil {
-			logrus.Error(err)
-			mu.Unlock()
-			return
-		}
-		clients[targetAddr] = targetConn
-	}
-	mu.Unlock()
-
-	_, err = targetConn.Write([]byte(msg.Data))
+	tcpConn, err := net.DialTCP("tcp", nil, rtcpAddr)
 	if err != nil {
 		logrus.Error(err)
 		return
 	}
-
-	logrus.Infof("Сообщение от %s переслано к %s", clientAddr.IP.String(), targetAddr)
+	clients[clientAddr.IP.String()] = tcpConn
+	defer tcpConn.Close()
+	for {
+		buf := make([]byte, 1024)
+		//bytesReader := make([]byte, 1)
+		var n int
+		n, err = tcpConn.Read(buf)
+		if err != nil {
+			break
+		}
+		fmt.Print("Message Received:", string(buf[0:n]), "\n")
+		newmessage := strings.ToUpper(string(buf))
+		_, err = tcpConn.Write([]byte("server" + ";;;" + newmessage + "\n"))
+		if err != nil {
+			return
+		}
+	}
 }
+
+//func handleClient(clientAddr *net.UDPAddr, data []byte) {
+//	var msg = Message{
+//		TargetIP:   clientAddr.IP.String(),
+//		TargetPort: clientAddr.Port,
+//		Data:       string(data),
+//	}
+//	logrus.WithFields(logrus.Fields{
+//		"target_ip":   msg.TargetIP,
+//		"target_port": msg.TargetPort,
+//		"data":        msg.Data,
+//	}).Println("Client data")
+//	mu.Lock()
+//	tcpConn, exists := clients[clientAddr.IP.String()]
+//	if !exists {
+//		tcpAddr, err := net.ResolveTCPAddr("tcp", msg.TargetIP+":"+msg.Data[len(msg.Data)-4:])
+//		if err != nil {
+//			logrus.Error(err)
+//			mu.Unlock()
+//			return
+//		}
+//
+//		tcpConn, err = net.DialTCP("tcp", nil, tcpAddr)
+//		if err != nil {
+//			logrus.Error(err)
+//			mu.Unlock()
+//			return
+//		}
+//		clients[clientAddr.IP.String()] = tcpConn
+//	}
+//	mu.Unlock()
+//
+//	targetAddr := msg.TargetIP + ":" + msg.Data[len(msg.Data)-4:]
+//	mu.Lock()
+//	targetConn, exists := clients[targetAddr]
+//	if !exists {
+//		tcpAddr, err := net.ResolveTCPAddr("tcp", targetAddr)
+//		if err != nil {
+//			logrus.Error(err)
+//			mu.Unlock()
+//			return
+//		}
+//
+//		targetConn, err = net.DialTCP("tcp", nil, tcpAddr)
+//		if err != nil {
+//			logrus.Error(err)
+//			mu.Unlock()
+//			return
+//		}
+//		clients[targetAddr] = targetConn
+//	}
+//	mu.Unlock()
+//
+//	_, err := targetConn.Write([]byte(msg.Data))
+//	if err != nil {
+//		logrus.Error(err)
+//		return
+//	}
+//
+//	logrus.Infof("Сообщение от %s переслано к %s", clientAddr.IP.String(), targetAddr)
+//}
