@@ -69,7 +69,9 @@ func executeServeCommand(_ *cobra.Command, _ []string) {
 			inputBytes := make([]byte, 1024)
 			n, clientAddress, err := connection.ReadFromUDP(inputBytes)
 			if err != nil {
-				fmt.Println(err)
+				if !strings.Contains(err.Error(), "i/o timeout") {
+					logrus.Println(err)
+				}
 				continue
 			}
 			fmt.Println("Received message from", clientAddress)
@@ -135,6 +137,9 @@ func handleTunnelClient(clientAddr *net.UDPAddr, data []byte) {
 func updateUsersInOnline(tcpConn *net.TCPConn, selfUsername string) {
 	mu.Lock()
 	for index, _ := range clients {
+		logrus.WithFields(logrus.Fields{
+			"index": index,
+		}).Println("")
 		if index == selfUsername {
 			continue
 		}
@@ -147,70 +152,10 @@ func updateUsersInOnline(tcpConn *net.TCPConn, selfUsername string) {
 func sendToUser(tcpConn *net.TCPConn, message string) {
 	logrus.WithFields(logrus.Fields{
 		"message": message,
+		"ip":      tcpConn.RemoteAddr().String(),
 	}).Println("Send to user")
 	_, err := tcpConn.Write([]byte(message))
 	if err != nil {
 		logrus.Error(err)
 	}
 }
-
-//func handleClient(clientAddr *net.UDPAddr, data []byte) {
-//	var msg = Message{
-//		TargetIP:   clientAddr.IP.String(),
-//		TargetPort: clientAddr.Port,
-//		Data:       string(data),
-//	}
-//	logrus.WithFields(logrus.Fields{
-//		"target_ip":   msg.TargetIP,
-//		"target_port": msg.TargetPort,
-//		"data":        msg.Data,
-//	}).Println("Client data")
-//	mu.Lock()
-//	tcpConn, exists := clients[clientAddr.IP.String()]
-//	if !exists {
-//		tcpAddr, err := net.ResolveTCPAddr("tcp", msg.TargetIP+":"+msg.Data[len(msg.Data)-4:])
-//		if err != nil {
-//			logrus.Error(err)
-//			mu.Unlock()
-//			return
-//		}
-//
-//		tcpConn, err = net.DialTCP("tcp", nil, tcpAddr)
-//		if err != nil {
-//			logrus.Error(err)
-//			mu.Unlock()
-//			return
-//		}
-//		clients[clientAddr.IP.String()] = tcpConn
-//	}
-//	mu.Unlock()
-//
-//	targetAddr := msg.TargetIP + ":" + msg.Data[len(msg.Data)-4:]
-//	mu.Lock()
-//	targetConn, exists := clients[targetAddr]
-//	if !exists {
-//		tcpAddr, err := net.ResolveTCPAddr("tcp", targetAddr)
-//		if err != nil {
-//			logrus.Error(err)
-//			mu.Unlock()
-//			return
-//		}
-//
-//		targetConn, err = net.DialTCP("tcp", nil, tcpAddr)
-//		if err != nil {
-//			logrus.Error(err)
-//			mu.Unlock()
-//			return
-//		}
-//		clients[targetAddr] = targetConn
-//	}
-//	mu.Unlock()
-//
-//	_, err := targetConn.Write([]byte(msg.Data))
-//	if err != nil {
-//		logrus.Error(err)
-//		return
-//	}
-//
-//	logrus.Infof("Сообщение от %s переслано к %s", clientAddr.IP.String(), targetAddr)
-//}
