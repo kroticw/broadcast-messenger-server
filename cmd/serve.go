@@ -43,14 +43,18 @@ func executeServeCommand(_ *cobra.Command, _ []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	serverAddress, err := net.ResolveUDPAddr("udp4", "255.255.255.255:8889")
+	serverAddress, err := net.ResolveUDPAddr("udp4", "192.168.0.255:8889")
 	if err != nil {
-		fmt.Println(err)
+		logrus.WithFields(logrus.Fields{
+			"err": err,
+		}).Println("resolve udp address error")
 		return
 	}
 	connection, err := net.ListenUDP("udp", serverAddress)
 	if err != nil {
-		fmt.Println(err)
+		logrus.WithFields(logrus.Fields{
+			"error": err,
+		}).Println("start listen error")
 		return
 	}
 	defer connection.Close()
@@ -62,7 +66,9 @@ func executeServeCommand(_ *cobra.Command, _ []string) {
 		default:
 			err := connection.SetReadDeadline(time.Now().Add(1 * time.Second))
 			if err != nil {
-				logrus.Fatal(err)
+				logrus.WithFields(logrus.Fields{
+					"error": err,
+				}).Println("set read deadline error")
 				return
 			}
 
@@ -70,12 +76,17 @@ func executeServeCommand(_ *cobra.Command, _ []string) {
 			n, clientAddress, err := connection.ReadFromUDP(inputBytes)
 			if err != nil {
 				if !strings.Contains(err.Error(), "i/o timeout") {
-					logrus.Println(err)
+					logrus.WithFields(logrus.Fields{
+						"error": err,
+					}).Println("read error")
 				}
 				continue
 			}
-			fmt.Println("Received message from", clientAddress)
-			fmt.Println(string(inputBytes))
+			logrus.WithFields(logrus.Fields{
+				"inputBytes": string(inputBytes),
+				"clientAddr": clientAddress,
+				"n":          n,
+			}).Println("Received message")
 			go handleTunnelClient(clientAddress, inputBytes[:n])
 		}
 	}
