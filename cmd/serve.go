@@ -43,7 +43,7 @@ func executeServeCommand(_ *cobra.Command, _ []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	serverAddress, err := net.ResolveUDPAddr("udp4", "192.168.0.255:8889")
+	serverAddress, err := net.ResolveUDPAddr("udp4", "255.255.255.255:8889")
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
 			"err": err,
