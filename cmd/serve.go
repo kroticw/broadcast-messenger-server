@@ -44,6 +44,7 @@ func executeServeCommand(_ *cobra.Command, _ []string) {
 		}).Println("start listen error")
 		return
 	}
+	logrus.WithField("server_addr", serverAddress).Infoln("Запущен обработчик broadcast UDP пакетов")
 	defer connection.Close()
 	for {
 		select {
@@ -63,9 +64,7 @@ func executeServeCommand(_ *cobra.Command, _ []string) {
 			err = json.NewDecoder(connection).Decode(&message)
 			if err != nil {
 				if !strings.Contains(err.Error(), "i/o timeout") {
-					logrus.WithFields(logrus.Fields{
-						"error": err,
-					}).Errorln("read decode error")
+					logrus.WithError(err).Error("Ошибка обработки UDP пакета")
 				}
 				continue
 			}
