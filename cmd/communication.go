@@ -84,6 +84,30 @@ func (c *Client) handleTunnelClient(ctx context.Context, clients *AtomicClientsM
 }
 
 func (c *Client) situationFile(message *TcpMessage, clients *AtomicClientsMap) error {
+	length, err := strconv.Atoi(message.ServiceData)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"error":    err,
+			"ip":       c.ClientIP,
+			"username": c.Username,
+		}).Errorln("error convert to int file length")
+		return err
+	}
+	fileBuf := make([]byte, length)
+    totalRead := 0
+    for totalRead < length {
+        n, err := c.Conn.Read(fileBuf[totalRead:])
+        if err != nil {
+            logrus.WithFields(logrus.Fields{
+                "error":    err,
+                "ip":       c.ClientIP,
+                "username": c.Username,
+            }).Errorln("error receive and read file")
+            return err
+        }
+        totalRead += n
+    }
+
 	newMes := &TcpMessage{
 		From:        message.From,
 		To:          message.To,
@@ -96,26 +120,6 @@ func (c *Client) situationFile(message *TcpMessage, clients *AtomicClientsMap) e
 		logrus.WithFields(logrus.Fields{
 			"error": err,
 		}).Errorln("error sending message")
-		return err
-	}
-
-	length, err := strconv.Atoi(message.ServiceData)
-	if err != nil {
-		logrus.WithFields(logrus.Fields{
-			"error":    err,
-			"ip":       c.ClientIP,
-			"username": c.Username,
-		}).Errorln("error convert to int file length")
-		return err
-	}
-	fileBuf := make([]byte, length)
-	_, err = c.Conn.Read(fileBuf)
-	if err != nil {
-		logrus.WithFields(logrus.Fields{
-			"error":    err,
-			"ip":       c.ClientIP,
-			"username": c.Username,
-		}).Errorln("error receive and read file")
 		return err
 	}
 	go c.sendFileTo(message.To, fileBuf, clients)
@@ -197,11 +201,15 @@ func (c *Client) sendFileTo(toUsername string, fileBuf []byte, clients *AtomicCl
 		logrus.Errorln("client not found for sending file")
 		return
 	}
-	_, err := client.Conn.Write(fileBuf)
-	if err != nil {
-		logrus.WithFields(logrus.Fields{
-			"error": err,
-		}).Errorln("error sending file")
-	}
-	return
+	totalWritten := 0
+    while totalWritten < len(fileBuf) {
+        n, err := client.Conn.Write(fileBuf[totalWritten:])
+        if err != nil {
+            logrus.WithFields(logrus.Fields{
+                "error": err,
+            }).Errorln("error sending file")
+            return
+        }
+        totalWritten += n
+    }
 }
