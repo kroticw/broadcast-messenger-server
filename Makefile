@@ -1,3 +1,3 @@
 .PHONY: serve
 serve:
-	@go run . serve --config=config.yaml
+	@go run . serve

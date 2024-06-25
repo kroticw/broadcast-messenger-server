@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"github.com/sirupsen/logrus"
 	"strconv"
+	"time"
 )
 
 func (c *Client) handleTunnelClient(ctx context.Context, clients *AtomicClientsMap) {
@@ -39,7 +40,7 @@ func (c *Client) handleTunnelClient(ctx context.Context, clients *AtomicClientsM
 				}
 			}
 		}
-
+		go c.meInOnline(clients)
 	}
 	for {
 		var message TcpMessage
@@ -51,6 +52,7 @@ func (c *Client) handleTunnelClient(ctx context.Context, clients *AtomicClientsM
 				"username": c.Username,
 			}).Errorln("error receive and decode message")
 			c.Close(clients)
+			return
 		}
 		logrus.WithFields(logrus.Fields{
 			"message":  message,
@@ -65,6 +67,7 @@ func (c *Client) handleTunnelClient(ctx context.Context, clients *AtomicClientsM
 					"error": err,
 				}).Errorln("situation file error")
 				c.Close(clients)
+				return
 			}
 		} else {
 			err = c.sendTo(&message, clients)
@@ -74,6 +77,7 @@ func (c *Client) handleTunnelClient(ctx context.Context, clients *AtomicClientsM
 				})
 				c.Close(clients)
 			}
+			return
 		}
 
 	}
@@ -85,21 +89,9 @@ func (c *Client) situationFile(message *TcpMessage, clients *AtomicClientsMap) e
 		To:          message.To,
 		ServiceType: message.ServiceType,
 		ServiceData: message.ServiceData,
+		Message:     message.Message,
 	}
 	err := c.sendTo(newMes, clients)
-	if err != nil {
-		logrus.WithFields(logrus.Fields{
-			"error": err,
-		}).Errorln("error sending message")
-		return err
-	}
-
-	err = c.sendTo(&TcpMessage{
-		From:        "server",
-		To:          message.From,
-		ServiceType: "cond",
-		ServiceData: "ready",
-	}, clients)
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
 			"error": err,
@@ -126,18 +118,45 @@ func (c *Client) situationFile(message *TcpMessage, clients *AtomicClientsMap) e
 		}).Errorln("error receive and read file")
 		return err
 	}
-	err = c.sendFileTo(message.To, fileBuf, clients)
-	if err != nil {
-		logrus.WithFields(logrus.Fields{
-			"error": err,
-		}).Errorln("error sending message")
-		return err
-	}
+	go c.sendFileTo(message.To, fileBuf, clients)
+	//if err != nil {
+	//	logrus.WithFields(logrus.Fields{
+	//		"error": err,
+	//	}).Errorln("error sending message")
+	//	return err
+	//}
 	return nil
 }
 
-func (c *Client) parseAndReaction(message *TcpMessage) {
+// функция, которая раз в 5 секунд отправляет всем в clients 2 сообщения - размер json и json, что она новый юзер
+func (c *Client) meInOnline(clients *AtomicClientsMap) {
+	defer c.Close(clients)
+	for {
 
+		mp := clients.GetMap()
+		for _, client := range mp {
+			if client.Username != c.Username {
+				var newClientMes TcpMessage
+				if client.Username != c.Username {
+					newClientMes = TcpMessage{
+						From:        "server",
+						To:          client.Username,
+						ServiceType: "new_user",
+						ServiceData: c.Username,
+					}
+
+					err := c.sendTo(&newClientMes, clients)
+					if err != nil {
+						logrus.WithFields(logrus.Fields{
+							"error": err,
+						}).Errorln("error sending message")
+						return
+					}
+				}
+			}
+		}
+		time.Sleep(60 * time.Second)
+	}
 }
 
 func (c *Client) sendTo(message *TcpMessage, clients *AtomicClientsMap) error {
@@ -162,6 +181,7 @@ func (c *Client) sendTo(message *TcpMessage, clients *AtomicClientsMap) error {
 			"error": err,
 		}).Errorln("error sending message size")
 	}
+	time.Sleep(200 * time.Millisecond)
 	err = json.NewEncoder(client.Conn).Encode(message)
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
@@ -171,11 +191,11 @@ func (c *Client) sendTo(message *TcpMessage, clients *AtomicClientsMap) error {
 	return nil
 }
 
-func (c *Client) sendFileTo(toUsername string, fileBuf []byte, clients *AtomicClientsMap) error {
+func (c *Client) sendFileTo(toUsername string, fileBuf []byte, clients *AtomicClientsMap) {
 	client, exist := clients.Get(toUsername)
 	if !exist {
 		logrus.Errorln("client not found for sending file")
-		return nil
+		return
 	}
 	_, err := client.Conn.Write(fileBuf)
 	if err != nil {
@@ -183,5 +203,5 @@ func (c *Client) sendFileTo(toUsername string, fileBuf []byte, clients *AtomicCl
 			"error": err,
 		}).Errorln("error sending file")
 	}
-	return nil
+	return
 }

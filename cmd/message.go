@@ -3,8 +3,8 @@ package cmd
 type TcpMessage struct {
 	From        string `json:"from"`
 	To          string `json:"to"`
-	ServiceType string `json:"service_type"`
-	ServiceData string `json:"service_data"`
+	ServiceType string `json:"servtype"`
+	ServiceData string `json:"servdata"`
 	Message     string `json:"message"`
 }
 
